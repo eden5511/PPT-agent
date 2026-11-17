@@ -69,15 +69,19 @@ function readFile(file) {
     reader.readAsDataURL(file);
   });
 }
-async function getPlan(grid, transform) {
-  const file = el("file").files[0];
-  check(file, "请在“Excel 交叉表”中选择工作簿");
+function readAliases() {
   const aliases = Object.create(null);
   for (const line of el("aliases").value.split(/\r?\n/).filter(x=>x.trim())) {
     const parts = line.split("=");
     check(parts.length === 2, "别名示例：Hair=洗发护发");
     aliases[parts[0].trim()] = parts[1].split(/[、,，]/).map(x=>x.trim());
   }
+  return aliases;
+}
+async function getPlan(grid, transform) {
+  const file = el("file").files[0];
+  check(file, "请在“Excel 交叉表”中选择工作簿");
+  const aliases = readAliases();
   const response = await fetch("/plan", {method:"POST", headers:{"Content-Type":"application/json"},
     body:JSON.stringify({file:await readFile(file), sheet:el("sheet").value.trim(), prefix:el("prefix").value.trim(), aliases, grid, transform})});
   if (response.status === 413) throw new Error("工作簿过大，请另存所需工作表后重试");
@@ -85,6 +89,80 @@ async function getPlan(grid, transform) {
   check(response.ok && !plan.error, plan.error || "读取 Excel 失败");
   return plan;
 }
+function chooseSource(choices) {
+  message("多组数据都能完整匹配，请选择本次使用的来源。");
+  const group = document.createElement("div");
+  el("log").append(group);
+  return new Promise(resolve => {
+    for (const choice of [...choices, null]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.style.float = "none";
+      button.textContent = choice ? choice.sheet + " · " + choice.prefix : "取消任务";
+      button.onclick = () => { group.remove(); resolve(choice); };
+      group.append(button);
+    }
+    group.scrollIntoView({block:"nearest"});
+  });
+}
+
+async function postLocal(path, payload) {
+  const response = await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+  if (response.status === 413) throw new Error("工作簿过大，请另存所需工作表后重试");
+  const result = await response.json();
+  check(response.ok && !result.error,result.error || "本地服务请求失败");
+  return result;
+}
+
+async function consult(ctx, text) {
+  const file = el("file").files[0];
+  check(file, "请先在 Excel 交叉表中选择 .xlsx 文件");
+  const selected = await selection(ctx);
+  const pages = [...new Set(Array.from(text.matchAll(/第\s*(\d+)\s*页/g), m=>Number(m[1])))];
+  check(pages.length <= 1, "当前补表任务一次处理一页，请指定目标页");
+  const page = pages[0] ?? selected.page;
+  check(page >= 1 && page <= selected.total,"目标页超出范围");
+  check(Office.context.requirements.isSetSupported("PowerPointApi","1.8"), "需要支持 PowerPointApi 1.8 的桌面版");
+  const slide = ctx.presentation.slides.getItemAt(page-1);
+  slide.load("id");
+  const shapes = slide.shapes.load("items/id,items/type");
+  await ctx.sync();
+  let tables = shapes.items.filter(shape=>shape.type === PowerPoint.ShapeType.table);
+  if (page === selected.page && selected.count) tables = tables.filter(shape=>shape.id === selected.shapeId);
+  check(tables.length === 1, "请点选唯一的目标表格，或点击目标页缩略图后重试");
+  const slideId = slide.id, shapeId = tables[0].id;
+  const {grid} = await snapshot(ctx,tables[0].getTable());
+  const payload = {file:await readFile(file), grid, aliases:readAliases()};
+  message("已锁定第 " + page + " 页的表格，正在搜索工作簿并核对来源。");
+  const result = await postLocal("/agent", {...payload,text,page});
+  if (result.trace?.length) message(result.trace.join(" → "));
+  if (result.notice) return result.notice;
+  let source = result.source, plan = result.plan;
+  if (result.choices) {
+    source = await chooseSource(result.choices);
+    if (!source) return "已取消，本次未写入。";
+    plan = await postLocal("/plan",{...payload,sheet:source.sheet,prefix:source.prefix});
+  }
+  const table = ctx.presentation.slides.getItem(slideId).shapes.getItem(shapeId).getTable();
+  const fresh = await snapshot(ctx, table);
+  check(JSON.stringify(fresh.grid) === JSON.stringify(grid),"取数期间目标表格已变化，请重新发送");
+  for (const e of plan.edits) {
+    check(e.row > 0 && e.col > 0 && fresh.grid[e.row]?.[e.col]?.trim() === "" && typeof e.value === "string" && e.source,
+      "计划包含无效位置或缺失来源");
+  }
+  for (const e of plan.edits) fresh.cells[e.row][e.col].text = e.value;
+  await ctx.sync();
+  const actual = await snapshot(ctx,table);
+  const expected = grid.map(row=>row.slice());
+  for (const e of plan.edits) expected[e.row][e.col] = e.value;
+  check(JSON.stringify(actual.grid) === JSON.stringify(expected),"写后复核不一致，请检查目标表");
+  const report = ["来源 " + source.sheet + " · " + source.prefix,
+    "第 " + page + " 页已复核，补空 " + plan.edits.length + " 格，一致 " + plan.same + " 格，已有差异 " + plan.conflicts.length + " 格。"];
+  for (const e of [...plan.edits,...plan.conflicts]) report.push(grid[e.row][0] + " / " + grid[0][e.col] + "：" +
+    (e.old ? "保留 " + e.old + "，来源 " : "已填 ") + e.value + "（" + e.source + "）");
+  return report.join("\n");
+}
+
 async function snapshot(ctx, table) {
   table.load("rowCount,columnCount");
   await ctx.sync();
@@ -180,6 +258,11 @@ Office.onReady(async info => {
     busy = true; el("send").disabled = true;
     const text = el("command").value.trim(); message(text,true);
     try {
+      if (el("agent-mode").checked) {
+        message(await PowerPoint.run(ctx=>consult(ctx,text)));
+        el("command").value = "";
+        return;
+      }
       if (/^DeepSeek\s+/i.test(text)) {
         const response = await fetch("/intent", {method:"POST", headers:{"Content-Type":"application/json"},
           body:JSON.stringify({text:text.replace(/^DeepSeek\s+/i,"")})});

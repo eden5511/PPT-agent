@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const certs = require("office-addin-dev-certs");
+const {runAgent} = require("./agent");
 const origin = "https://localhost:3000";
 
 function workbook(data) {
@@ -41,7 +42,7 @@ async function intent({text}) {
 async function serve(req, res) {
   try {
     if (req.headers.host !== "localhost:3000") { res.writeHead(403).end(); return; }
-    if (req.method === "POST" && ["/plan", "/intent"].includes(req.url)) {
+    if (req.method === "POST" && ["/plan", "/intent", "/agent"].includes(req.url)) {
       if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
         res.writeHead(403).end(); return;
       }
@@ -53,7 +54,10 @@ async function serve(req, res) {
         chunks.push(chunk);
       }
       const body = Buffer.concat(chunks);
-      const result = req.url === "/intent" ? await intent(JSON.parse(body)) : await workbook(body);
+      let result;
+      if (req.url === "/agent") result = await runAgent(JSON.parse(body), args=>workbook(Buffer.from(JSON.stringify(args))));
+      else if (req.url === "/intent") result = await intent(JSON.parse(body));
+      else result = await workbook(body);
       res.writeHead(result.error ? 400 : 200, {"Content-Type":"application/json"}).end(JSON.stringify(result));
       return;
     }

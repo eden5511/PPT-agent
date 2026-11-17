@@ -35,3 +35,39 @@ test("explicit page and row label take precedence over current slide", async()=>
   assert.equal(range.text,"原标题");
   await assert.rejects(env.execute(ctx,env.parse("把第16页第0行第2列改为90")));
 });
+
+function consultFixture(changeValue) {
+  const {ctx,cells,range} = fixture();
+  loaded(ctx.presentation.slides.items[15]);
+  ctx.presentation.slides.getItem = id => {
+    assert.equal(id,"16");
+    return ctx.presentation.slides.items[15];
+  };
+  const shapes = ctx.presentation.slides.items[15].shapes;
+  shapes.getItem = id=>{assert.equal(id,"3");return shapes.items[0];};
+  cells[1][1].text = "";
+  env.FileReader = class {readAsDataURL(){this.result="data:application/octet-stream;base64,WA==";this.onload();}};
+  env.document = {getElementById(id){if(id === "file")return {files:[{}]};
+    if(id === "aliases")return {value:""}; return {append(){}};},
+    createElement(){return {scrollIntoView(){}};}};
+  env.fetch = async (_url, options)=>{
+    const input = JSON.parse(options.body);
+    assert.equal(input.page,16);
+    ctx.presentation.getSelectedSlides = ()=>loaded({items:[ctx.presentation.slides.items[7]]});
+    if(changeValue)cells[1][1].text="手动修改";
+    return {ok:true,json:async()=>({source:{sheet:"本期",prefix:"Q"},plan:{same:0,conflicts:[],
+      edits:[{row:1,col:1,old:"",value:"100",source:"本期!B2"}]}})};
+  };
+  return {ctx,cells,range};
+}
+test("consultation pins target and reports verified source after user changes slides", async()=>{
+  const {ctx,cells,range} = consultFixture(false);
+  assert.match(await env.consult(ctx,"用 Excel 补齐第16页"),/本期!B2/);
+  assert.equal(cells[1][1].text,"100");
+  assert.equal(range.text,"原标题");
+});
+test("concurrent manual edit survives and the outdated plan stops",async()=>{
+  const {ctx,cells} = consultFixture(true);
+  await assert.rejects(env.consult(ctx,"用 Excel 补齐第16页"),/已变化/);
+  assert.equal(cells[1][1].text,"手动修改");
+});

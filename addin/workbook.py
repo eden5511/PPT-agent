@@ -15,8 +15,45 @@ def key(value):
     return re.sub(r"[\s‘’“”'\"【】]", "", unicodedata.normalize("NFKC", str(value or ""))).casefold()
 
 
-ALIASES = {"hair": ["护发", "洗护发", "头发护理"], "skin": ["护肤", "护肤品"],
-           "baby": ["婴儿护理", "母婴"], "fem": ["女性护理"]}
+ALIASES = {
+  "hair": [
+    "护发",
+    "洗护发",
+    "头发护理",
+    "洗护发产品"
+  ],
+  "skin": [
+    "护肤",
+    "护肤品"
+  ],
+  "baby": [
+    "婴儿护理",
+    "母婴",
+    "婴儿用品"
+  ],
+  "fem": [
+    "女性护理",
+    "妇女卫生产品"
+  ],
+  "pcc(沐浴露)": [
+    "沐浴露"
+  ],
+  "pcc(身体乳)": [
+    "身体乳"
+  ],
+  "fhc": [
+    "衣物洗涤产品"
+  ],
+  "ocnp": [
+    "牙膏"
+  ],
+  "power": [
+    "电动牙刷"
+  ],
+  "shave": [
+    "手动剃须刀"
+  ]
+}
 
 
 def unique(items, label):
@@ -38,7 +75,12 @@ def formatted(cell, is_base):
         if "%" in cell.number_format:
             number *= 100
         return str(number.quantize(Decimal(1), rounding=ROUND_HALF_UP)) + "%"
-    return str(value).strip()
+    text = str(value).strip()
+    if is_base:
+        text = text.rstrip("*").strip()
+        if not re.fullmatch(r"[0-9]+", text):
+            raise ValueError(f"{cell.coordinate} 的 Base 不是整数")
+    return text
 
 
 def plan(ws, prefix, grid, aliases):
@@ -68,27 +110,32 @@ def plan(ws, prefix, grid, aliases):
             raise ValueError(f"重复题号 {block_id}")
         seen_ids.add(block_id)
         name = key(title.value)
+        category_match = re.search(r"\s[-–—]\s*(.+?)\s*\[[^\]]+\]\s*$", str(title.value))
+        if category_match:
+            name = key(category_match[1])
         category = unique([c for c in cols if any(t in name for t in terms[c])], f"{title.coordinate} 品类")
         if category in seen:
             raise ValueError(f"品类重复 {category}")
         seen.add(category)
         # The closest preceding Base belongs to this question. Its own column header
         # must occur between the previous question and this Base.
-        bases = [i for i in range(previous + 1, start) if key(data[i][0].value) == "base"]
-        if not bases:
-            raise ValueError(f"{title.coordinate} 上方找不到 Base")
-        base = bases[-1]
         headers = [(i, j) for i in range(previous + 1, start + 1) for j, cell in enumerate(data[i])
                    if key(cell.value) == "total"]
         if not headers:
             raise ValueError(f"{title.coordinate} 找不到 Total")
         last_header = max(i for i, _ in headers)
         column = unique([j for i, j in headers if i == last_header], "Total 列")
+        bases = [i for i in range(last_header + 1, start)
+                 if re.fullmatch(r"base(?:\s*[-–—]\s*.+)?", str(data[i][0].value or "").strip(), re.I)]
+        base = unique(bases, f"{title.coordinate} 上方的 Base")
+        base_label = str(data[base][0].value)
+        if category_match and "-" in base_label and key(base_label.split("-", 1)[1]) != name:
+            raise ValueError(f"{title.coordinate} 的 Base 品类与题目不一致")
         end = markers[idx + 1][0] if idx + 1 < len(markers) else len(data)
         source_rows = {"base": base}
         for i in range(start + 1, end):
             k = key(data[i][0].value)
-            if k == "base" or any(key(c.value) == "total" for c in data[i][1:]):
+            if not k or k == "base" or any(key(c.value) == "total" for c in data[i][1:]):
                 break
             if k in rows:
                 if k in source_rows:
@@ -113,10 +160,35 @@ def plan(ws, prefix, grid, aliases):
     return dict(edits=filled, conflicts=conflicts, same=same)
 
 
+def discover(book, grid):
+    """Find repeated question families whose first block contains target row labels."""
+    marker = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z][A-Za-z0-9_]*)_\d+(?![A-Za-z0-9_])")
+    wanted = {key(row[0]) for row in grid[1:]} - {"base", ""}
+    candidates = []
+    for ws in book.worksheets:
+        labels = [str(row[0] or "") for row in ws.iter_rows(max_col=1, values_only=True)]
+        groups = {}
+        for i, label in enumerate(labels):
+            match = marker.search(label)
+            if match:
+                groups.setdefault(match[1], []).append(i)
+        for prefix, starts in groups.items():
+            if len(starts) != len(grid[0]) - 1:
+                continue
+            sample = labels[starts[0]+1:starts[0]+1+len(grid)+100]
+            overlap = len(wanted.intersection(map(key, sample)))
+            if overlap or not wanted:
+                candidates.append({"sheet": ws.title, "prefix": prefix, "blocks": len(starts),
+                                   "matchedRows": overlap, "titleRow": starts[0]+1})
+    return {"sheets": book.sheetnames, "candidates": candidates}
+
+
 def main():
     arg = json.load(sys.stdin)
     book = load_workbook(io.BytesIO(base64.b64decode(arg["file"], validate=True)), data_only=True, read_only=True)
     try:
+        if arg.get("operation") == "discover":
+            return print(json.dumps(discover(book, arg["grid"])))
         if arg.get("transform"):
             from transform import transform
             return print(json.dumps(transform(book[arg["sheet"]], arg["transform"])))
