@@ -1,0 +1,6 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PPT-agent</title>
+<link rel="stylesheet" href="pane.css"><script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script><script defer src="pane.js"></script></head>
+<body><header><h1>PPT-agent</h1></header><main id="log" role="log" aria-live="polite"><p>点选一个标题框，输入“把这个标题改成品牌考虑度”。</p></main>
+<form><details><summary>Excel 交叉表</summary><label>工作簿<input type="file" id="file" accept=".xlsx"></label><label>工作表<input id="sheet" value="品类搜_合并数据"></label><label>题号前缀<input id="prefix" value="B6B8E57"></label><label>品类别名（每行一组）<textarea id="aliases" placeholder="Hair=洗发护发"></textarea></label></details>
+<div id="selection">正在连接 PowerPoint…</div><div id="target"></div>
+<textarea id="command" aria-label="编辑指令" placeholder="输入消息，例如：把这页第3行第2列改为待复核" required></textarea><button disabled id="send">发送</button></form></body></html>

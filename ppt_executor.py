@@ -21,6 +21,64 @@ class PPTExecutor:
         ppt_path = context.ppt_path
         prs = Presentation(ppt_path)
 
+        from pathlib import Path
+        from tempfile import NamedTemporaryFile
+        from os import unlink
+        if intent["type"] == "unknown":
+            return intent.get("msg", "无法识别")
+        with NamedTemporaryFile(prefix=Path(ppt_path).stem + "_修改版_", suffix=".pptx",
+                                dir=Path(ppt_path).resolve().parent, delete=False) as temp:
+            output = temp.name
+        try:
+            result = self._dispatch(prs, intent, output)
+            if Path(output).stat().st_size:
+                context.set_ppt(output)
+                return result + "\n已保存 " + output
+        except BaseException:
+            unlink(output)
+            raise
+        unlink(output)
+        return result
+
+    def _dispatch(self, prs, intent, ppt_path):
+        if intent["type"] == "cross":
+            from pathlib import Path
+            from addin.workbook import plan
+            page = intent["page"]
+            if not 1 <= page <= len(prs.slides):
+                raise ValueError("页码超出范围")
+            tables = [s.table for s in prs.slides[page-1].shapes if s.has_table]
+            if len(tables) != 1:
+                raise ValueError("目标页需要有一张可唯一确定的表格")
+            table = tables[0]
+            grid = [[cell.text for cell in row.cells] for row in table.rows]
+            source = Path(intent["source"])
+            if not source.is_absolute():
+                source = Path(ppt_path).parent / source
+            book = openpyxl.load_workbook(source, read_only=True, data_only=True)
+            try:
+                result = plan(book[intent["sheet"]], intent["prefix"], grid, {})
+            finally:
+                book.close()
+            for edit in result["edits"]:
+                cell = table.cell(edit["row"], edit["col"])
+                cell.text = edit["value"]
+            if result["edits"]:
+                prs.save(ppt_path)
+            report = f'一致 {result["same"]} 格，补空 {len(result["edits"])} 格，已有差异 {len(result["conflicts"])} 格'
+            for diff in result["conflicts"]:
+                report += f'\n{diff["source"]}：Excel {diff["value"]}，PPT {diff["old"]}'
+            return report
+        if intent["type"] == "title_text":
+            page = intent["page"]
+            if not 1 <= page <= len(prs.slides):
+                raise ValueError("页码超出范围")
+            title = prs.slides[page - 1].shapes.title
+            if title is None:
+                raise ValueError("该页没有标题占位符")
+            title.text = intent["text"]
+            prs.save(ppt_path)
+            return f"已修改第 {page} 页标题"
         if intent["type"] == "set_style":
             return self._set_style(prs, intent, ppt_path)
         elif intent["type"] == "replace_text":
@@ -71,12 +129,21 @@ class PPTExecutor:
                     if shape.is_placeholder and shape.placeholder_format.type == 2:
                         should_modify = True
                 else:
-                    # 默认：所有文本都改（兜底）
-                    should_modify = True
+                    should_modify = False
 
                 if should_modify:
                     for para in shape.text_frame.paragraphs:
                         for run in para.runs:
+                            if intent.get("font"):
+                                from pptx.oxml.xmlchemy import OxmlElement
+                                from pptx.oxml.ns import qn
+                                run.font.name = intent["font"]
+                                props = run._r.get_or_add_rPr()
+                                east_asian = props.find(qn("a:ea"))
+                                if east_asian is None:
+                                    east_asian = OxmlElement("a:ea")
+                                    props.append(east_asian)
+                                east_asian.set("typeface", intent["font"])
                             if size:
                                 run.font.size = Pt(size)
                             if color:
@@ -107,7 +174,7 @@ class PPTExecutor:
                             count += 1
 
         prs.save(path)
-        return f"已替换 {count} 处 "{old}" → "{new}""
+        return f'已替换 {count} 处 "{old}" → "{new}"' 
 
     def _fill_data(self, prs, intent, path):
         """从 Excel 读取数据，填充到 PPT 表格"""

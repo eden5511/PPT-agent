@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xsi:type="TaskPaneApp">
+  <Id>d38f6590-6d9f-4ba2-a28e-6bf249db16b4</Id><Version>0.1.0.0</Version><ProviderName>PPT-agent</ProviderName><DefaultLocale>zh-CN</DefaultLocale>
+  <DisplayName DefaultValue="PPT-agent"/><Description DefaultValue="在当前演示文稿中定位并编辑文字和表格。"/>
+  <IconUrl DefaultValue="https://localhost:3000/icon32.png"/><SupportUrl DefaultValue="https://github.com/Yeeden-rgb/PPT-agent"/>
+  <Hosts><Host Name="Presentation"/></Hosts><Requirements><Sets><Set Name="PowerPointApi" MinVersion="1.5"/></Sets></Requirements>
+  <DefaultSettings><SourceLocation DefaultValue="https://localhost:3000/pane.html"/></DefaultSettings><Permissions>ReadWriteDocument</Permissions>
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Hosts><Host xsi:type="Presentation"><DesktopFormFactor><FunctionFile resid="pane"/>
+    <ExtensionPoint xsi:type="PrimaryCommandSurface"><OfficeTab id="TabHome"><Group id="AgentGroup"><Label resid="name"/><Icon><bt:Image size="16" resid="img16"/><bt:Image size="32" resid="img32"/><bt:Image size="80" resid="img80"/></Icon>
+    <Control xsi:type="Button" id="AgentOpen"><Label resid="name"/><Supertip><Title resid="name"/><Description resid="hint"/></Supertip><Icon><bt:Image size="16" resid="img16"/><bt:Image size="32" resid="img32"/><bt:Image size="80" resid="img80"/></Icon>
+    <Action xsi:type="ShowTaskpane"><TaskpaneId>AgentPane</TaskpaneId><SourceLocation resid="pane"/></Action></Control>
+    </Group></OfficeTab></ExtensionPoint></DesktopFormFactor></Host></Hosts>
+    <Resources><bt:Images><bt:Image id="img16" DefaultValue="https://localhost:3000/icon16.png"/><bt:Image id="img32" DefaultValue="https://localhost:3000/icon32.png"/><bt:Image id="img80" DefaultValue="https://localhost:3000/icon80.png"/></bt:Images><bt:Urls><bt:Url id="pane" DefaultValue="https://localhost:3000/pane.html"/></bt:Urls>
+    <bt:ShortStrings><bt:String id="name" DefaultValue="PPT-agent"/></bt:ShortStrings><bt:LongStrings><bt:String id="hint" DefaultValue="打开编辑侧边栏"/></bt:LongStrings></Resources>
+  </VersionOverrides>
+</OfficeApp>

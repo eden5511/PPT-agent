@@ -14,7 +14,15 @@ class IntentParser:
         """
         text = text.strip()
         lower = text.lower()
+        cross = re.fullmatch(r'交叉表补空\s+"([^"]+)"\s+"([^"]+)"\s+(\w+)\s+第\s*(\d+)\s*页', text)
+        if cross:
+            return dict(type="cross", source=cross[1], sheet=cross[2], prefix=cross[3], page=int(cross[4]))
 
+        if re.search(r"微软雅黑|宋体|黑体|楷体|Arial|Calibri", text, re.I) and "替换" not in text:
+            return self._parse_style(text)
+        title = re.fullmatch(r"[把将]?第\s*(\d+)\s*页的?标题改[为成]\s*(.+)", text)
+        if title and not re.search(r"色|号字|磅|pt", title[2], re.I):
+            return {"type": "title_text", "page": int(title[1]), "text": title[2]}
         # 优先级 1: 改样式（字体、颜色、字号）
         if any(k in lower for k in ["标题", "字体", "颜色", "字号", "大小", "改成", "设置为"]):
             if any(k in lower for k in ["红", "蓝", "黑", "绿", "黄", "号", "pt", "大小"]):
@@ -43,13 +51,13 @@ class IntentParser:
         }
         color = None
         for name, code in color_map.items():
-            if name in text:
+            if name in re.sub(r"微软雅黑|黑体", "", text):
                 color = code
                 break
 
         # 解析字号（支持 "24号"、"24 号"、"24pt"）
         size = None
-        match = re.search(r'(\d+)\s*[号号pt]', text)
+        match = re.search(r'(\d+)\s*(?:号|磅|pt)', text)
         if match:
             size = int(match.group(1))
 
@@ -63,13 +71,14 @@ class IntentParser:
         element = "title"  # 默认标题
         if "正文" in text or "内容" in text:
             element = "body"
-        if "全部" in text or "所有文字" in text:
+        if "标题" not in text and any(x in text for x in ("全部", "全篇", "所有文字")):
             element = "all_text"
 
         return {
             "type": "set_style",
             "target": target,      # "all" 或具体页码
             "element": element,    # "title" / "body" / "all_text"
+            "font": next((f for f in ("微软雅黑", "宋体", "黑体", "楷体", "Arial", "Calibri") if f in text), None),
             "color": color,        # 十六进制颜色码
             "size": size,          # 字号（Pt）
         }

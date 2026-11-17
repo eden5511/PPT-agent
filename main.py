@@ -8,10 +8,10 @@ import sys
 # 把当前目录加入路径，方便导入 agent 模块
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from agent.intent_parser import IntentParser
-from agent.ppt_executor import PPTExecutor
-from agent.context_manager import ContextManager
-from tools.ppt_tools import create_sample_files
+from intent_parser import IntentParser
+from ppt_executor import PPTExecutor
+from context_manager import ContextManager
+from ppt_tools import create_sample_files
 
 
 def print_banner():
